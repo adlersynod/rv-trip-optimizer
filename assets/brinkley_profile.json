@@ -1,0 +1,35 @@
+{
+  "name": "Brinkley 4100",
+  "year": 2024,
+  "type": "Fifth Wheel",
+  "dimensions": {
+    "length_ft": 43,
+    "width_ft": 8.5,
+    "height_ft": 13.5,
+    "height_inches": 162,
+    "clearance_buffer_ft": 1
+  },
+  "weight": {
+    "dry_weight_lbs": 16500,
+    "gross_weight_lbs": 20000,
+    "loaded_weight_lbs": 45000,
+    "hitch_weight_lbs": 2800
+  },
+  "tow_vehicle": "2025 Ram 3500 Dually",
+  "towing": {
+    "max_towing_capacity_lbs": 37500,
+    "pin_weight_capacity_lbs": 3500
+  },
+  "routing_constraints": {
+    "min_clearance_ft": 14.5,
+    "avoid_single_lane_roads": true,
+    "avoid_weight_restricted_roads": true,
+    "max_grade_percent": 8,
+    "prefer_divided_highways": true
+  },
+  "fuel": {
+    "type": "Diesel",
+    "fuel_capacity_gal": 50,
+    "mpg_estimated": 12
+  }
+}
