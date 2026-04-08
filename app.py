@@ -294,7 +294,7 @@ with tab_explorer:
             with st.expander(f"📚 Also worth a look ({len(remaining)} more)"):
                 for item in remaining:
                     url = item.get("yelp_url") or item.get("ta_url") or ""
-                    tier_label = f"[{item.get('tier','').replace('_',' '').title()}]"
+                    tier_label = f"[{item.get('tier','').replace('_',' ').title()}]"
                     st.markdown(f"- **{item['name']}** — {tier_label} ({item.get('category', 'Attraction')})")
                     if url:
                         st.caption(f"[🔗 View]({url})" if len(url) < 80 else f"[🔗 View]({url[:60]}...)", unsafe_allow_html=True)
