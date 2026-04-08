@@ -196,7 +196,6 @@ if plan_btn and start_addr and end_addr:
     routes = engine.get_safe_routes(
         (start_geo["lat"], start_geo["lon"]),
         (end_geo["lat"], end_geo["lon"]),
-        alternatives=3,
         toll_threshold=float(toll_threshold),
     )
 

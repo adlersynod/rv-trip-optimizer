@@ -1,0 +1,11 @@
+# render.yaml — RV Trip Optimizer Blueprint
+# Deploys as a Python web service with Streamlit
+
+services:
+  - type: web
+    name: rv-trip-optimizer
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
+    healthCheckPath: /
+    plan: free
