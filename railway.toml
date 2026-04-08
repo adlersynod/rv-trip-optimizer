@@ -8,5 +8,9 @@ builder = "NIXPACKS"
 pythonVersion = "3.11"
 
 [deploy]
-startCommand = "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0"
+# Railway injects $PORT env var; Streamlit needs --server.port pointing to it
+startCommand = "streamlit run app.py --server.address=0.0.0.0"
+environment = [
+  "STREAMLIT_SERVER_PORT=$PORT",
+]
 healthCheckPath = "/"
