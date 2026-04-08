@@ -1,0 +1,15 @@
+# Cache files
+cache/
+
+# OS artifacts
+.DS_Store
+*.pyc
+__pycache__/
+
+# Local env
+.env
+venv/
+.venv/
+
+# OpenClaw workspace artifacts
+shared-context.md
