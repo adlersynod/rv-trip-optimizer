@@ -159,7 +159,7 @@ class FoliumMapper:
         plugins.Fullscreen().add_to(self._map)
 
         # Add measure tool
-        plugins.Measure().add_to(self._map)
+        plugins.MeasureControl().add_to(self._map)
 
         if output_path:
             self._map.save(output_path)
