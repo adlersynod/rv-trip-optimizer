@@ -1,70 +1,125 @@
 """
 itinerary.py — AI-powered itinerary builder for RV Explorer
 
-Builds a loose day-by-day plan from attractions, dining, and RV parks.
+Handles three recommendation tiers:
+  - Tourist Favorites: must-see, top-rated
+  - Local Gems: underrated, locally loved
+  - Unique Ideas: quirky, one-of-a-kind experiences
+
 Respects:
   - Weekday: 2-3 hrs max (remote work constraint)
   - Weekend: Full day available
-  - RV travel: Driving between stops factored in
+  - RV travel overhead
 """
 
 from typing import List, Dict, Any, Optional
-import math
+
+# ─── Time Constants ───────────────────────────────────────────────
+WEEKDAY_MORNING_MAX = 0.75   # hrs — quick coffee, walk, farmer's market
+WEEKDAY_EVENING_MAX = 2.5    # hrs — main attraction or dinner outing
+SATURDAY_DAY = 7.0           # hrs — full day Saturday
+SUNDAY_HALF = 4.5            # hrs — half day Sunday
 
 
-# ─────────────────────────────────────────────
-# Time Constants
-# ─────────────────────────────────────────────
-WEEKDAY_MORNING_MIN = 0.5   # hrs — quick walk, coffee, farmer's market
-WEEKDAY_EVENING_MAX = 2.5   # hrs — main attraction or dinner outing
-SATURDAY_DAY = 7.0          # hrs — full day Saturday
-SUNDAY_HALF = 4.0           # hrs — half day Sunday
-TRANSIT_OVERHEAD = 0.5      # hrs — travel/parking/setup between stops
-
-
-def _estimate_activities(attractions: List[Dict[str, Any]]) -> float:
-    """Estimate total hours needed for all attractions."""
-    total = 0.0
-    for a in attractions:
-        time_str = a.get("estimated_time", "2 hrs")
-        try:
-            hrs = float(time_str.replace(" hrs", "").replace(" hr", "").strip())
-        except Exception:
-            hrs = 2.0
-        total += hrs
-    return total
-
-
-def _parse_price(price_str: str) -> float:
-    """Convert price string like '$45/night' to float."""
-    if not price_str or price_str in ("N/A", "Free", "Unknown"):
-        return 0.0
+def _estimate_hours(time_str: Optional[str]) -> float:
+    """Parse estimated_time string → hours."""
+    if not time_str:
+        return 2.0
+    s = time_str.lower().strip()
     try:
-        nums = [float(s) for s in price_str if s.isdigit() or s == "."]
-        return float("".join(str(n) for n in nums)) if nums else 0.0
+        if "min" in s or "hr" not in s:
+            m = float(re.sub(r"[^0-9.]", "", s))
+            return max(0.5, m / 60)
+        nums = re.findall(r"[\d.]+", s)
+        if not nums:
+            return 2.0
+        val = float(nums[0])
+        if "h" in s and "-" in s:
+            # "1-2 hrs" → average
+            return (val + float(nums[1])) / 2 if len(nums) > 1 else val
+        return val
     except Exception:
-        return 0.0
+        return 2.0
 
 
-def _categorize_items(attractions: List[Dict[str, Any]], restaurants: List[Dict[str, Any]]) -> Dict[str, List]:
-    """Group attractions into Morning / Afternoon / Evening buckets."""
-    categories = {"nature": [], "food": [], "culture": [], "relax": []}
-    for a in attractions:
-        cat = a.get("category", "").lower()
-        desc = a.get("description", "").lower()
-        if any(w in cat or w in desc for w in ["park", "trail", "lake", "nature", "hike", "nps", "national", "beach"]):
-            categories["nature"].append(a)
-        elif any(w in cat or w in desc for w in ["museum", "historic", "culture", "art", "downtown", "old", "site"]):
-            categories["culture"].append(a)
-        elif any(w in cat or w in desc for w in ["restaurant", "dining", "eat", "food", "brew"]):
-            categories["food"].append(a)
+import re
+
+
+def _categorize_by_tier(attractions: List[Dict[str, Any]]) -> Dict[str, List]:
+    """
+    Split attractions into three tiers.
+    Returns dict with keys: tourist_favorites, local_gems, unique_ideas
+    """
+    tiers = {
+        "tourist_favorites": [],
+        "local_gems": [],
+        "unique_ideas": [],
+        "food": [],
+    }
+
+    for item in attractions:
+        tier = item.get("tier", "tourist_favorite")
+        if tier == "food" or "restaurant" in item.get("category", "").lower() or "food" in item.get("category", "").lower() or "brew" in item.get("category", "").lower():
+            tiers["food"].append(item)
+        elif tier in ("tourist_favorite", "tourist"):
+            tiers["tourist_favorites"].append(item)
+        elif tier == "local_gem":
+            tiers["local_gems"].append(item)
+        elif tier == "unique_idea":
+            tiers["unique_ideas"].append(item)
         else:
-            categories["relax"].append(a)
+            tiers["tourist_favorites"].append(item)
 
-    for r in restaurants:
-        categories["food"].append(r)
+    return tiers
 
-    return categories
+
+def _build_day_slots(
+    items: List[Dict[str, Any]],
+    day_label: str,
+    slot_times: List[str],
+    is_full_day: bool = False,
+) -> Dict[str, Any]:
+    """
+    Map a list of items into Morning / Afternoon / Evening slots.
+    Each item gets its own slot.
+    """
+    slots = []
+    time_idx = 0
+
+    for item in items:
+        if time_idx >= len(slot_times):
+            break
+        time_label = slot_times[time_idx]
+        time_idx += 1
+
+        hrs = _estimate_hours(item.get("estimated_time"))
+        icon = ""
+        if "nature" in item.get("category", "").lower() or "hike" in item.get("category", "").lower() or "park" in item.get("category", "").lower():
+            icon = "🌲"
+        elif "museum" in item.get("category", "").lower() or "historic" in item.get("category", "").lower():
+            icon = "🏛"
+        elif "food" in item.get("category", "").lower() or "restaurant" in item.get("category", "").lower() or "brew" in item.get("category", "").lower():
+            icon = "🍽"
+        elif "unique" in item.get("category", "").lower() or "quirky" in item.get("category", "").lower():
+            icon = "✨"
+        else:
+            icon = "📍"
+
+        activity_parts = [f"{icon} {item['name']}"]
+        if item.get("description"):
+            desc = item["description"]
+            if len(desc) > 120:
+                desc = desc[:120] + "…"
+            activity_parts.append(f"_{desc}_")
+
+        slots.append({
+            "time": time_label,
+            "activity": " | ".join(activity_parts),
+            "duration": item.get("estimated_time", f"~{hrs:.1f} hrs"),
+            "item": item,
+        })
+
+    return {"label": day_label, "slots": slots}
 
 
 def build_itinerary(
@@ -78,139 +133,165 @@ def build_itinerary(
     num_weekend_days: int = 2,
 ) -> Dict[str, Any]:
     """
-    Build a complete stay plan.
+    Build a complete stay plan from rich attractions data.
 
-    Args:
-        city, state: Destination
-        attractions: List from attractions.py
-        restaurants: List from attractions.py
-        rv_parks: List from rv_parks.py
-        arrival_date: ISO date string or None
-        num_weekdays: Number of weeknights (default: 2 = Fri/Sat nights)
-        num_weekend_days: Weekend full days (default: 2 = Sat/Sun)
-
-    Returns:
-        Dict with keys: summary, days (list), stay_duration, rv_parks, tips
+    Each day has Morning / Afternoon / Evening slots.
+    Items come from tourist_favorites, local_gems, and unique_ideas tiers.
     """
-    categories = _categorize_items(attractions, restaurants)
-    total_hours = _estimate_activities(attractions)
-    nature_hours = _estimate_activities(categories["nature"])
-    culture_hours = _estimate_activities(categories["culture"])
+    tiers = _categorize_by_tier(attractions)
 
-    # ── Stay Duration ──────────────────────────
-    weekday_hours_available = num_weekdays * WEEKDAY_EVENING_MAX
-    weekend_hours_available = num_weekend_days * SATURDAY_DAY
-    total_available = weekday_hours_available + weekend_hours_available
+    tourist = tiers["tourist_favorites"]
+    gems = tiers["local_gems"]
+    unique = tiers["unique_ideas"]
+    food = tiers["food"] + restaurants
 
-    if total_hours <= weekday_hours_available:
+    # Reserve food items for evening and midday slots
+    food_pool = food[:]
+    all_other = tourist + gems + unique
+
+    # Estimate total hours
+    total_hours = sum(_estimate_hours(a.get("estimated_time")) for a in all_other)
+    weekday_available = num_weekdays * WEEKDAY_EVENING_MAX
+    weekend_available = num_weekend_days * SATURDAY_DAY
+    total_available = weekday_available + weekend_available
+
+    # Stay duration
+    if total_hours <= weekday_available:
+        duration_label = f"{num_weekdays}-night weekend getaway"
         stay_nights = num_weekdays
-        stay_days = num_weekdays + 1
-        duration_label = f"{stay_nights}-night weekend getaway"
     elif total_hours <= total_available:
         stay_nights = num_weekdays + num_weekend_days
-        stay_days = stay_nights + 1
-        duration_label = f"{stay_nights}-night / {stay_days}-day extended stay"
+        duration_label = f"{stay_nights}-night extended stay"
     else:
-        # Compress itinerary — prioritize
         stay_nights = max(2, num_weekdays)
-        stay_days = stay_nights + 1
-        duration_label = f"{stay_nights}-night stay (condensed itinerary)"
+        duration_label = f"{stay_nights}-night stay (condensed)"
 
-    # ── Day-by-Day Plan ────────────────────────
     days = []
     day_num = 1
 
-    # Weekday evenings
-    for i in range(min(num_weekdays, 3)):
-        if i == 0:
-            label = f"Day {day_num} — Friday Evening"
-        elif i == 1:
-            label = f"Day {day_num} — Saturday Evening" if num_weekdays > 1 else f"Day {day_num} — Weekday Evening"
-        else:
-            label = f"Day {day_num} — Evening"
-
-        slots = []
-        # Morning slot (optional for weekday)
-        if categories["nature"] and i == 0:
-            item = categories["nature"].pop(0)
-            slots.append({"time": "Morning", "activity": f"☕ Quick coffee walk + {item['name']}", "duration": "30-60 min", "item": item})
-        elif categories["relax"] and i == 0:
-            item = categories["relax"].pop(0)
-            slots.append({"time": "Morning", "activity": f"☕ Relaxed morning — {item['name']}", "duration": "1 hr", "item": item})
-
-        # Afternoon — nature or culture
-        if categories["nature"]:
-            item = categories["nature"].pop(0)
-            slots.append({"time": "Afternoon", "activity": f"🌲 {item['name']}", "duration": item.get("estimated_time", "2-3 hrs"), "item": item})
-        elif categories["culture"]:
-            item = categories["culture"].pop(0)
-            slots.append({"time": "Afternoon", "activity": f"🏛 {item['name']}", "duration": item.get("estimated_time", "2-3 hrs"), "item": item})
-
-        # Evening — food
-        if categories["food"]:
-            item = categories["food"].pop(0)
-            slots.append({"time": "Evening", "activity": f"🍽 {item['name']}", "duration": "1.5-2 hrs", "item": item})
-
-        days.append({"label": label, "slots": slots})
-        day_num += 1
-
-    # Weekend full days
-    for i in range(num_weekend_days):
-        label = f"Day {day_num} — {'Saturday' if i == 0 else 'Sunday'} (Full Day)"
-        slots = []
-
-        # Morning
-        if categories["nature"]:
-            item = categories["nature"].pop(0)
-            slots.append({"time": "Morning", "activity": f"🌲 {item['name']}", "duration": item.get("estimated_time", "2-3 hrs"), "item": item})
-        elif categories["culture"]:
-            item = categories["culture"].pop(0)
-            slots.append({"time": "Morning", "activity": f"🏛 {item['name']}", "duration": item.get("estimated_time", "2-3 hrs"), "item": item})
-
-        # Midday — food
-        if categories["food"]:
-            item = categories["food"].pop(0)
-            slots.append({"time": "Midday", "activity": f"🍽 Lunch — {item['name']}", "duration": "1-1.5 hrs", "item": item})
-
-        # Afternoon
-        if categories["nature"]:
-            item = categories["nature"].pop(0)
-            slots.append({"time": "Afternoon", "activity": f"🌲 {item['name']}", "duration": item.get("estimated_time", "2-3 hrs"), "item": item})
-        elif categories["culture"]:
-            item = categories["culture"].pop(0)
-            slots.append({"time": "Afternoon", "activity": f"🏛 {item['name']}", "duration": item.get("estimated_time", "2-3 hrs"), "item": item})
-
-        # Evening — scenic + dinner
-        if categories["nature"]:
-            item = categories["nature"].pop(0)
-            slots.append({"time": "Evening", "activity": f"🌅 Sunset at {item['name']} + dinner", "duration": "2-3 hrs", "item": item})
-        elif categories["food"]:
-            item = categories["food"].pop(0)
-            slots.append({"time": "Evening", "activity": f"🍽 Dinner — {item['name']}", "duration": "1.5-2 hrs", "item": item})
-
-        days.append({"label": label, "slots": slots})
-        day_num += 1
-
-    # ── Tips ──────────────────────────────────
-    avg_park_price = 0.0
-    if rv_parks:
-        prices = [_parse_price(p.get("price", "")) for p in rv_parks]
-        prices = [p for p in prices if p > 0]
-        if prices:
-            avg_park_price = sum(prices) / len(prices)
-
-    tips = [
-        "🌅 Arrive mid-afternoon to check into RV park before dark",
-        "🚐 Give yourself 30 min buffer between major attractions for setup/travel",
+    # ── Weekday Evenings ──────────────────────────────────────────
+    weekday_times = [
+        ("Morning", "🌅 Quick stop"),
+        ("Afternoon", "🏛 Main attraction"),
+        ("Evening", "🍽 Dinner"),
     ]
-    if avg_park_price > 0:
-        tips.append(f"💰 Average RV park cost: ~${avg_park_price:.0f}/night")
-    if nature_hours > 4:
-        tips.append("🥾 Pack layers — nature trails vary in difficulty, bring water and snacks")
-    if any("brew" in r.get("description","").lower() or "brew" in r.get("name","").lower() for r in categories["food"]):
-        tips.append("🍺 Local brewery alert — great evening wind-down spot!")
 
-    # ── RV Park Summary ────────────────────────
+    for i in range(min(num_weekdays, 3)):
+        label = f"Day {day_num} — {'Friday' if i == 0 else 'Saturday' if i == 1 else 'Weekday'} Evening"
+        day_slots = []
+
+        # Morning: coffee / quick nature if morning slot requested
+        if i == 0 and gems:
+            item = gems.pop(0)
+            day_slots.append({
+                "time": "Morning",
+                "activity": f"☕ Quick walk — {item['name']}",
+                "duration": "30-45 min",
+                "item": item,
+            })
+
+        # Afternoon: top tourist attraction
+        if all_other:
+            item = all_other.pop(0)
+            day_slots.append({
+                "time": "Afternoon",
+                "activity": f"📍 {item['name']}",
+                "duration": item.get("estimated_time", "2-3 hrs"),
+                "item": item,
+            })
+
+        # Evening: dinner
+        if food_pool:
+            item = food_pool.pop(0)
+            day_slots.append({
+                "time": "Evening",
+                "activity": f"🍽 {item['name']}",
+                "duration": "1.5-2 hrs",
+                "item": item,
+            })
+
+        if day_slots:
+            days.append({"label": label, "slots": day_slots})
+        day_num += 1
+
+    # ── Full Weekend Days ─────────────────────────────────────────
+    weekend_slot_times = [
+        "Morning", "Midday", "Afternoon", "Evening"
+    ]
+
+    for i in range(num_weekend_days):
+        label = f"Day {day_num} — {'Saturday' if day_num == num_weekdays + 1 else 'Sunday'} (Full Day)"
+        day_slots = []
+
+        # Morning: top attraction
+        if all_other:
+            item = all_other.pop(0)
+            day_slots.append({
+                "time": "Morning",
+                "activity": f"🌲 {item['name']}",
+                "duration": item.get("estimated_time", "2-3 hrs"),
+                "item": item,
+            })
+        elif gems:
+            item = gems.pop(0)
+            day_slots.append({
+                "time": "Morning",
+                "activity": f"✨ {item['name']} [Local Gem]",
+                "duration": item.get("estimated_time", "1-2 hrs"),
+                "item": item,
+            })
+
+        # Midday: food / lunch
+        if food_pool:
+            item = food_pool.pop(0)
+            day_slots.append({
+                "time": "Midday",
+                "activity": f"🍽 Lunch — {item['name']}",
+                "duration": "1 hr",
+                "item": item,
+            })
+
+        # Afternoon: local gem or second attraction
+        if gems:
+            item = gems.pop(0)
+            day_slots.append({
+                "time": "Afternoon",
+                "activity": f"✨ {item['name']} [Local Gem]",
+                "duration": item.get("estimated_time", "1-2 hrs"),
+                "item": item,
+            })
+        elif all_other:
+            item = all_other.pop(0)
+            day_slots.append({
+                "time": "Afternoon",
+                "activity": f"📍 {item['name']}",
+                "duration": item.get("estimated_time", "2-3 hrs"),
+                "item": item,
+            })
+
+        # Evening: scenic + dinner
+        if unique:
+            item = unique.pop(0)
+            day_slots.append({
+                "time": "Evening",
+                "activity": f"🌅 {item['name']} [Unique]",
+                "duration": "1.5-2 hrs",
+                "item": item,
+            })
+        elif food_pool:
+            item = food_pool.pop(0)
+            day_slots.append({
+                "time": "Evening",
+                "activity": f"🍽 {item['name']}",
+                "duration": "1.5-2 hrs",
+                "item": item,
+            })
+
+        if day_slots:
+            days.append({"label": label, "slots": day_slots})
+        day_num += 1
+
+    # ── RV Parks ─────────────────────────────────────────────────
     park_summaries = []
     for p in rv_parks[:3]:
         price = p.get("price", "N/A")
@@ -224,6 +305,20 @@ def build_itinerary(
             "url": p.get("url", ""),
         })
 
+    # ── Tips ─────────────────────────────────────────────────────
+    tips = [
+        "🌅 Arrive mid-afternoon to check into RV park before dark",
+        "🚐 Allow 30 min buffer between major attractions for setup/travel",
+    ]
+    if unique:
+        tips.append(f"✨ {unique[0]['name']} is a highlight — save it for evening if possible")
+    if any("brew" in f.get("name", "").lower() or "brew" in f.get("category", "").lower() for f in food[:3]):
+        tips.append("🍺 Local brewery alert — great wind-down spot after driving day")
+    if any("farm" in a.get("category", "").lower() or "market" in a.get("category", "").lower() for a in all_other[:5]):
+        tips.append("🛒 Check local farmer's market — often on weekends only")
+    if any("hike" in a.get("category", "").lower() or "trail" in a.get("category", "").lower() for a in tourist[:3]):
+        tips.append("🥾 Pack layers and water — trail conditions vary")
+
     return {
         "destination": f"{city}, {state}",
         "stay_duration": duration_label,
@@ -232,32 +327,82 @@ def build_itinerary(
         "days": days,
         "rv_parks": park_summaries,
         "tips": tips,
-        "remaining_attractions": categories["nature"] + categories["culture"] + categories["relax"],
+        "remaining_attractions": all_other + gems + unique,
+        "tiers": {
+            "tourist_favorites": tourist[:5],
+            "local_gems": gems[:4],
+            "unique_ideas": unique[:3],
+            "food": food[:5],
+        },
     }
 
 
-def format_itinerary_text(result: Dict[str, Any]) -> str:
-    """Format the itinerary as readable markdown text."""
+def format_itinerary_markdown(result: Dict[str, Any]) -> str:
+    """
+    Format the full itinerary as readable markdown with links.
+    """
     lines = [
         f"# 🗺️ Stay Plan: {result['destination']}",
         f"**Recommended Stay:** {result['stay_duration']}",
-        f"**Estimated exploration time:** {result['estimated_hours']:.1f} hrs available",
         "",
     ]
 
+    # Tiers overview
+    tiers = result.get("tiers", {})
+    if tiers.get("tourist_favorites"):
+        lines.append("## ⭐ Tourist Favorites")
+        for item in tiers["tourist_favorites"]:
+            url = item.get("yelp_url") or item.get("ta_url") or item.get("wiki_url") or item.get("nps_url") or ""
+            rating = f" ★ {item['rating']}" if item.get("rating") else ""
+            desc = f" — {item['description'][:100]}" if item.get("description") else ""
+            lines.append(f"- **{item['name']}**{rating}{desc}")
+            if url:
+                lines.append(f"  🔗 [View Details]({url})")
+
+    if tiers.get("local_gems"):
+        lines.append("\n## ✨ Local Gems")
+        for item in tiers["local_gems"]:
+            url = item.get("yelp_url") or item.get("reddit_url") or ""
+            desc = f" — {item['description'][:100]}" if item.get("description") else ""
+            lines.append(f"- **{item['name']}**{desc}")
+            if url:
+                lines.append(f"  🔗 [View Details]({url})")
+
+    if tiers.get("unique_ideas"):
+        lines.append("\n## 🎯 Unique Ideas")
+        for item in tiers["unique_ideas"]:
+            url = item.get("yelp_url") or ""
+            lines.append(f"- **{item['name']}**")
+            if url:
+                lines.append(f"  🔗 [View Details]({url})")
+
+    if tiers.get("food"):
+        lines.append("\n## 🍽 Where to Eat")
+        for item in tiers["food"]:
+            url = item.get("yelp_url") or ""
+            rating = f" ★ {item['rating']}" if item.get("rating") else ""
+            price = f" ({item.get('category', '')})" if item.get("category") else ""
+            lines.append(f"- **{item['name']}**{rating}{price}")
+            if url:
+                lines.append(f"  🔗 [Yelp]({url})")
+
+    lines.append("\n## 🗓️ Day-by-Day Itinerary")
     for day in result["days"]:
-        lines.append(f"## {day['label']}")
+        lines.append(f"\n### {day['label']}")
         for slot in day["slots"]:
-            lines.append(f"- **{slot['time']}** ({slot['duration']}): {slot['activity']}")
-        lines.append("")
+            item = slot.get("item", {})
+            url = item.get("yelp_url") or item.get("ta_url") or item.get("wiki_url") or item.get("nps_url") or ""
+            link_str = f" [🔗]({url})" if url else ""
+            lines.append(f"- **{slot['time']}** ({slot['duration']}): {slot['activity']}{link_str}")
 
-    lines.append("## 🏕 RV Parks")
-    for park in result["rv_parks"]:
-        lines.append(f"- **{park['name']}** — {park['category']} | {park['price']} | {park['big_rig']} {park['rating']}")
+    if result.get("rv_parks"):
+        lines.append("\n## 🏕️ RV Parks")
+        for park in result["rv_parks"]:
+            url_str = f" [Book Now]({park['url']})" if park.get("url") else ""
+            lines.append(f"- **{park['name']}** — {park['category']} · {park['price']}/night · {park['big_rig']}{url_str}")
 
-    if result["tips"]:
-        lines.append("")
-        lines.append("## 💡 Tips")
+    if result.get("tips"):
+        lines.append("\n## 💡 Tips")
         for tip in result["tips"]:
             lines.append(f"- {tip}")
 

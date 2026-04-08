@@ -23,7 +23,7 @@ from stops.connectivity_scorer import ConnectivityScorer
 from map_builder.folium_mapper import FoliumMapper
 from explorer.attractions import get_attractions, get_restaurants
 from explorer.rv_parks import get_rv_parks
-from explorer.itinerary import build_itinerary, format_itinerary_text
+from explorer.itinerary import build_itinerary, format_itinerary_markdown
 
 # ─────────────────────────────────────────────
 # Page Config
@@ -140,6 +140,7 @@ with tab_explorer:
     # ── Display Results ────────────────────────
     if st.session_state.explorer_result:
         result = st.session_state.explorer_result
+        tiers = result.get("tiers", {})
 
         # Summary Bar
         st.divider()
@@ -156,7 +157,84 @@ with tab_explorer:
             park_count = len(result.get("rv_parks", []))
             st.metric("RV Parks", park_count)
 
-        # Itinerary
+        # ── Three Tiers of Recommendations ───────────────────────
+        st.divider()
+        st.subheader("⭐ What to Do")
+
+        tier_col1, tier_col2, tier_col3 = st.columns(3)
+
+        # Column 1: Tourist Favorites
+        with tier_col1:
+            st.markdown("**🏛️ Tourist Favorites**")
+            st.caption("Top-rated must-sees")
+            for item in tiers.get("tourist_favorites", [])[:5]:
+                url = item.get("yelp_url") or item.get("ta_url") or item.get("wiki_url") or item.get("nps_url") or ""
+                rating_str = f" ★ {item['rating']}" if item.get("rating") else ""
+                source_str = f" · {item.get('source','')}" if item.get('source') else ""
+                time_str = f" · {item.get('estimated_time','')}" if item.get('estimated_time') else ""
+                st.markdown(f"**{item['name']}**{rating_str}")
+                if item.get("description"):
+                    st.caption(item["description"][:90], help=item["description"])
+                if url:
+                    st.markdown(f"[🔗 View]({url})" if len(url) < 80 else f"[🔗 View]({url[:60]}...)", unsafe_allow_html=True)
+                else:
+                    st.caption(item.get("category",""))
+                st.divider()
+
+        # Column 2: Local Gems
+        with tier_col2:
+            st.markdown("**✨ Local Gems**")
+            st.caption("Underrated spots locals love")
+            for item in tiers.get("local_gems", [])[:5]:
+                url = item.get("yelp_url") or item.get("reddit_url") or ""
+                rating_str = f" ★ {item['rating']}" if item.get("rating") else ""
+                source_str = f" · {item.get('source','')}" if item.get('source') else ""
+                st.markdown(f"**{item['name']}**{rating_str}{source_str}")
+                if item.get("description"):
+                    st.caption(item["description"][:90], help=item["description"])
+                if url:
+                    st.markdown(f"[🔗 View]({url})" if len(url) < 80 else f"[🔗 View]({url[:60]}...)", unsafe_allow_html=True)
+                else:
+                    st.caption(item.get("category",""))
+                st.divider()
+
+        # Column 3: Unique Ideas
+        with tier_col3:
+            st.markdown("**🎯 Unique Ideas**")
+            st.caption("One-of-a-kind experiences")
+            for item in tiers.get("unique_ideas", [])[:5]:
+                url = item.get("yelp_url") or ""
+                source_str = f" · {item.get('source','')}" if item.get('source') else ""
+                st.markdown(f"**{item['name']}**{source_str}")
+                if item.get("description"):
+                    st.caption(item["description"][:90], help=item["description"])
+                if url:
+                    st.markdown(f"[🔗 View]({url})" if len(url) < 80 else f"[🔗 View]({url[:60]}...)", unsafe_allow_html=True)
+                else:
+                    st.caption(item.get("category",""))
+                st.divider()
+
+        # ── Food & Drink ─────────────────────────────────────────
+        food_items = tiers.get("food", [])
+        if food_items:
+            st.divider()
+            st.subheader("🍽 Where to Eat")
+            food_cols = st.columns([1, 1, 1])
+            for i, item in enumerate(food_items[:6]):
+                col = food_cols[i % 3]
+                with col:
+                    url = item.get("yelp_url") or ""
+                    rating_str = f" ★ {item['rating']}" if item.get("rating") else ""
+                    st.markdown(f"**{item['name']}**{rating_str}")
+                    if item.get("category"):
+                        st.caption(item["category"][:60])
+                    if item.get("address"):
+                        st.caption(item["address"][:60])
+                    if url:
+                        st.markdown(f"[🔗 Yelp]({url})" if len(url) < 80 else f"[🔗 Yelp]({url[:60]}...)", unsafe_allow_html=True)
+                    st.divider()
+
+        # ── Day-by-Day Itinerary ────────────────────────────────
         st.divider()
         st.subheader("🗓️ Your Stay Plan")
 
@@ -171,14 +249,18 @@ with tab_explorer:
                         st.markdown(f"**{slot['time']}**")
                         st.caption(slot["duration"])
                     with col_act:
-                        st.markdown(slot["activity"])
+                        # Show activity with any inline URL
+                        st.markdown(slot["activity"].replace("|", " — "))
                         if item:
+                            url = item.get("yelp_url") or item.get("ta_url") or item.get("wiki_url") or item.get("nps_url") or ""
                             if item.get("rating"):
                                 st.caption(f"★ {item.get('rating')} · {item.get('source', '')}")
+                            if url:
+                                st.markdown(f"[🔗 More Info]({url})" if len(url) < 80 else f"[🔗 More Info]({url[:60]}...)", unsafe_allow_html=True)
                             if item.get("description") and item.get("source") != "Wikipedia":
-                                st.caption(item["description"][:100])
+                                st.caption(item["description"][:120])
 
-        # RV Parks
+        # ── RV Parks ─────────────────────────────────────────────
         if result.get("rv_parks"):
             st.divider()
             st.subheader("🏕️ RV Parks (Big Rig Friendly)")
@@ -192,34 +274,37 @@ with tab_explorer:
                         if park.get("rating"):
                             st.markdown(f"**Rating:** {park['rating']}")
                         if park.get("url"):
-                            st.markdown(f"[View Details]({park['url']})")
+                            st.markdown(f"[📍 View Details & Book]({park['url']})")
                     with right:
-                        # Check-in/check-out visual
                         st.markdown("### ✅")
                         st.caption("Checked-in")
                         st.markdown("### 📍")
                         st.caption(f"Stay: {nights} nights")
 
-        # Tips
+        # ── Tips ─────────────────────────────────────────────────
         if result.get("tips"):
             st.divider()
             with st.expander("💡 Travel Tips for This Destination"):
                 for tip in result["tips"]:
                     st.markdown(f"- {tip}")
 
-        # Remaining attractions (not in itinerary)
+        # ── Also Worth a Look ────────────────────────────────────
         remaining = result.get("remaining_attractions", [])
         if remaining:
             with st.expander(f"📚 Also worth a look ({len(remaining)} more)"):
                 for item in remaining:
-                    st.markdown(f"- **{item['name']}** ({item.get('category', 'Attraction')})")
+                    url = item.get("yelp_url") or item.get("ta_url") or ""
+                    tier_label = f"[{item.get('tier','').replace('_',' '').title()}]"
+                    st.markdown(f"- **{item['name']}** — {tier_label} ({item.get('category', 'Attraction')})")
+                    if url:
+                        st.caption(f"[🔗 View]({url})" if len(url) < 80 else f"[🔗 View]({url[:60]}...)", unsafe_allow_html=True)
                     if item.get("description"):
-                        st.caption(item["description"][:120])
+                        st.caption(item["description"][:100])
 
-        # Downloadable text plan
-        plan_text = format_itinerary_text(result)
+        # ── Download Plan ────────────────────────────────────────
+        plan_text = format_itinerary_markdown(result)
         st.download_button(
-            "📥 Download Stay Plan (.md)",
+            "📥 Download Full Stay Plan (.md)",
             data=plan_text,
             file_name=f"rv_stay_plan_{result['destination'].replace(' ', '_')}.md",
             mime="text/markdown",
